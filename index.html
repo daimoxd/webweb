@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Perfiles</title>
+    <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+    <!-- Contenedor Principal de la SPA -->
+    <div id="app">
+        <!-- Navegación Superior -->
+        <header class="navbar">
+            <h1 class="brand">Generador de Perfiles UI Reactiva</h1>
+            <nav id="main-nav">
+                <a href="#/crear" class="nav-link active">Crear Perfil</a>
+                <a href="#/galeria" class="nav-link">Galería</a>
+            </nav>
+        </header>
+        <!-- Contenedor Dinámico: Aquí controlamos las vistas -->
+        <main id="router-view">
+            <!-- ========================================== -->
+            <!-- MÓDULO DE CREACIÓN DE PERFIL      -->
+            <!-- ========================================== -->
+            <div id="view-create" class="view-module active">
+                <div class="view-create-profile">
+
+                    <!-- Panel Izquierdo: Controles y Formularios -->
+                    <section class="form-container">
+                        <h2>Diseña tu Perfil</h2>
+
+                        <div class="api-search-block">
+                            <label for="github-search">Autocompletar desde GitHub</label>
+                            <div class="input-group-row">
+                                <input type="text" id="github-search" placeholder="Usuario (Ej. octocat)">
+                                <button type="button" id="btn-fetch" class="btn-secondary">Buscar</button>
+                            </div>
+                            <span id="api-status" class="status-msg"></span>
+                        </div>
+                        <hr>
+
+
+                        <!-- Entrada Manual -->
+                        <form id="profile-form">
+                            <!-- Selector de Avatares -->
+                            <div class="input-group">
+                                <label>Elige un Avatar</label>
+                                <div id="avatar-selector" class="avatar-grid">
+                                    <!-- Los avatares se inyectarán aquí con JavaScript -->
+                                </div>
+                            </div>
+                            <div class="input-group">
+                                <label for="input-name">Nombre a mostrar</label>
+                                <input type="text" id="input-name" placeholder="Tu Nombre">
+                            </div>
+
+                            <div class="input-group">
+                                <label for="input-bio">Biografía</label>
+                                <textarea id="input-bio" rows="3" placeholder="Cuéntanos sobre ti..."></textarea>
+                            </div>
+
+                            <div class="input-group">
+                                <label for="input-color">Color de acento</label>
+                                <input type="color" id="input-color" value="#3b82f6">
+                            </div>
+
+                            <button type="submit" class="btn-primary">Guardar Tarjeta</button>
+                        </form>
+                    </section>
+
+                    <!-- Panel Derecho: Previsualización en Tiempo Real -->
+                    <section class="card-container">
+                        <article id="profile-card" class="card">
+                            <div class="card-header" id="preview-header"></div>
+                            <img id="avatar-preview" src="src/assets/HideoKojima.png" alt="Avatar" class="avatar">
+                            <div class="card-body">
+                                <h3 id="name-preview">Nombre Apellido</h3>
+                                <p id="bio-preview">La biografía aparecerá aquí...</p>
+                            </div>
+                        </article>
+                    </section>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Script de lógica -->
+    <script src="js/app.js"></script>
+</body>
+</html>
