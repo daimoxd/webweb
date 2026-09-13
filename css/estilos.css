@@ -72,7 +72,7 @@ label{
 }
 input[type="text"], textarea{
     padding: 0.6rem;
-    broder: 1px solid var(--border-color);
+    border: 1px solid var(--border-color);
     border-radius: 6px;
     font-family: inherit;
     width: 100%;
@@ -84,6 +84,10 @@ input[type="color"]{
     border-radius: 6px;
     cursor: pointer;
 }
+.input-group-row{
+    display: flex;
+    gap: 0.5rem;
+}
 .input-group-row input{flex: 1;}
 hr{
     border: 0;
@@ -92,7 +96,7 @@ hr{
      margin: 1.5rem  0;
 }
 button{
-    padding: 0.6rem 1,2rem;
+    padding: 0.6rem 1.2rem;
     border: none;
     border-radius: 6px;
     font-weight: 600;
@@ -177,4 +181,83 @@ button{
     .card-container{
         flex: 1;
     }
+}
+
+/* --- ESTILOS DE LA GALERÍA --- */
+.gallery-header{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.gallery-grid{
+    display: grid;
+    /* Responsive automático: crea tantas columnas de mínimo 300px como quepan */
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 2rem;
+    padding: 0 2rem 2rem 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* Reutilizamos el estilo de la tarjeta que ya tenías, asegurando que ocupe el 100% de su celda */
+.gallery-grid .card{
+    width: 100%;
+}
+
+/* --- SISTEMA DE ENRUTAMIENTO SPA --- */
+.view-module{
+    display: none; /* Oculta todas las vistas por defecto */
+    animation: fadeIn 0.4s ease-in-out;
+}
+
+.view-module.active{
+    display: block; /* Solo muestra la vista activa */
+}
+
+@keyframes fadeIn{
+    from{ opacity: 0; transform: translateY(10px); }
+    to{ opacity: 1; transform: translateY(0); }
+}
+
+/* --- Botón secundario y mensajes de estado (usados por galería y API) --- */
+.btn-secondary{
+    background-color: #e2e8f0;
+    color: #1e293b;
+    padding: 0.6rem 1.2rem;
+}
+
+.btn-secondary:hover{
+    background-color: #cbd5e1;
+}
+
+.btn-secondary:disabled,
+.btn-primary:disabled{
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.nav-link.active{
+    color: var(--primary-color);
+}
+
+.status-msg{
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+    display: inline-block;
+}
+
+.status-loading{
+    color: #64748b;
+}
+
+.status-success{
+    color: #16a34a;
+}
+
+.status-error{
+    color: #dc2626;
 }
