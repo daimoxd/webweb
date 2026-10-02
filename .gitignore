@@ -1,0 +1,12 @@
+# .gitignore
+
+# Datos generados en runtime: las tarjetas las crea la app, no el repo.
+api/data/tarjetas.json
+
+# Entorno local de PHP
+vendor/
+.env
+
+# Sistema
+.DS_Store
+Thumbs.db

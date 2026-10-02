@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    container_name: sp1-2-3web2
+    ports:
+      # Solo escucha en loopback: no expones el sitio a la red local.
+      - "127.0.0.1:8080:80"
+    volumes:
+      # Codigo montado en caliente: editar un archivo en el host se refleja
+      # al instante en el navegador, sin reconstruir la imagen.
+      - .:/var/www/html
+      # Monta este volumen ENCIMA del bind mount para que el chmod del
+      # Dockerfile no se pierda: los permisos se aplican sobre la copia real.
+      - api_data:/var/www/html/api/data
+    environment:
+      # Apache registra en stdout/stderr para que `docker compose logs` muestre
+      # los errores de PHP en lugar de esconderlos en archivos del contenedor.
+      APACHE_DOCUMENT_ROOT: /var/www/html
+    restart: unless-stopped
+
+volumes:
+  api_data:

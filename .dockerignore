@@ -1,0 +1,18 @@
+# Contexto de build: todo lo que la imagen NO necesita.
+.git
+.gitignore
+node_modules
+vendor
+
+# Se montan como volumen en runtime; no deben quedar congelados en la imagen.
+api/data
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Docs y editor
+*.md
+.vscode
+.idea
