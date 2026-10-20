@@ -261,3 +261,66 @@ button{
 .status-error{
     color: #dc2626;
 }
+
+/* --- Inputs extendidos (migrado SP2-2: registro/login) --- */
+input[type="text"], input[type="email"], input[type="password"],
+input[type="date"], input[type="tel"], input[type="number"],
+textarea, select.form-select {
+  padding: 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-family: inherit;
+  width: 100%;
+  background-color: white;
+}
+
+.input-group-row .input-group { flex: 1; }
+
+/* --- MÓDULO DE AUTENTICACIÓN (migrado SP2-2) --- */
+.auth-container {
+  max-width: 600px;
+  margin: 2rem auto;
+  background: var(--card-bg);
+  border-radius: 12px;
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+  border: 1px solid var(--border-color);
+  padding: 2rem;
+}
+
+.auth-tabs {
+  display: flex;
+  margin-bottom: 2rem;
+  border-bottom: 2px solid var(--border-color);
+}
+
+.auth-tab {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 1rem;
+    font-size: 1.1rem;
+    color: #64748b;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    border-radius: 0;
+    transition: color 0.3s, border-color 0.3s;
+}
+
+.auth-tab:hover {
+  color: var(--primary-hover);
+}
+
+.auth-tab.active {
+  color: var(--primary-color);
+  border-bottom-color: var(--primary-color);
+}
+
+.auth-form {
+  display: none;
+  animation: fadeIn 0.4s ease-in-out;
+}
+
+.auth-form.active{
+  display: block;
+}
