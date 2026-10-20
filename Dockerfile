@@ -1,8 +1,9 @@
 # Imagen base con Apache y PHP ya configurado.
 FROM php:8.3-apache
 
-# El endpoint usa __DIR__, date() y json_encode; no hay dependencias
-# externas (sin Composer), asi que no hace falta instalar nada mas.
+# No hay dependencias externas (sin Composer). Lo unico que hace falta es el
+# driver de MySQL para PDO, que es como la API habla con el servicio `db`.
+RUN docker-php-ext-install pdo_mysql
 
 # Apache sirve el sitio desde /var/www/html. El proyecto ya usa rutas
 # relativas (api/index.php, css/..., js/..., src/assets/...), por lo que
@@ -20,13 +21,21 @@ RUN { \
     } > /etc/apache2/conf-available/charset.conf \
     && a2enconf charset
 
-# --- Permisos de escritura -------------------------------------------------
-# api/data/ es la unica carpeta que el endpoint necesita escribir (tarjetas.json).
-# En un bind mount el propietario es el del host, no www-data, asi que
-# ajustamos el grupo para que ambos puedan escribir.
+# --- Permisos y datos heredados --------------------------------------------
+# api/data/ ya no se escribe: MySQL es la fuente de datos. Los JSON que queden
+# ahi solo se leen una vez para importarlos cuando las tablas estan vacias.
 RUN mkdir -p /var/www/html/api/data \
     && chown -R www-data:www-data /var/www/html/api/data \
     && chmod 775 /var/www/html/api/data
+
+# Bloquea el acceso HTTP directo a api/data/ (por si queda el usuarios.json
+# antiguo con hashes de contrasenas). PHP puede seguir leyendo los archivos.
+RUN { \
+      echo '<Directory /var/www/html/api/data>'; \
+      echo '    Require all denied'; \
+      echo '</Directory>'; \
+    } > /etc/apache2/conf-available/api-data.conf \
+    && a2enconf api-data
 
 EXPOSE 80
 

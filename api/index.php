@@ -6,9 +6,22 @@
     // Sesión PHP: se usa para login/logout y para saber quién guarda tarjetas.
     session_start();
 
-    // Origen de datos:
-    // Se movió FUERA de la ruta pública directa (antes se leía con fetch
-    // directo desde app.js); ahora solo este endpoint lo toca.
+    /*--------------------------------------------------------------------------
+    * Configuración de MySQL.
+    * En Docker las variables las inyecta docker-compose.yml. Los valores por
+    * defecto permiten probar el endpoint contra un MySQL local sin configurar
+    * nada; en producción cámbialos con un archivo .env o variables de entorno.
+    *--------------------------------------------------------------------------*/
+    define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');
+    define('DB_PORT', getenv('DB_PORT') ?: '3306');
+    define('DB_NAME', getenv('DB_NAME') ?: 'sp123_web2');
+    define('DB_USER', getenv('DB_USER') ?: 'sp123_user');
+    // getenv() devuelve false cuando la variable no existe; se permite una
+    // contraseña vacía si alguien la define explícitamente así.
+    define('DB_PASSWORD', getenv('DB_PASSWORD') !== false ? getenv('DB_PASSWORD') : 'sp123_pass');
+
+    // Los JSON de api/data/ ya no son la fuente de datos: solo se leen una vez
+    // para importar los registros existentes cuando la base está vacía.
     define('RUTA_DATOS', __DIR__ . '/data/tarjetas.json');
     define('RUTA_USUARIOS', __DIR__ . '/data/usuarios.json');
     /**
@@ -37,101 +50,199 @@
         ]);
     }
     /*--------------------------------------------------------------------------
-    * Persistencia: el archivo JSON es la única fuente de datos.
+    * Persistencia: MySQL mediante PDO (extensión pdo_mysql).
     *--------------------------------------------------------------------------*/
-    function leerTarjetas() {
-        if (!file_exists(RUTA_DATOS)) {
+    function conexion() {
+        static $pdo = null;
+
+        if ($pdo instanceof PDO) {
+            return $pdo;
+        }
+
+        $dsn = sprintf(
+            'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
+            DB_HOST,
+            DB_PORT,
+            DB_NAME
+        );
+
+        try {
+            $pdo = new PDO($dsn, DB_USER, DB_PASSWORD, [
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                // Prepared statements reales: evita interpolación en el cliente.
+                PDO::ATTR_EMULATE_PREPARES   => false,
+            ]);
+
+            inicializarEsquema($pdo);
+        } catch (PDOException $e) {
+            // No se exponen credenciales ni detalles del motor al cliente.
+            responderError('No se pudo conectar con la base de datos.', 500);
+        }
+
+        return $pdo;
+    }
+
+    function inicializarEsquema(PDO $pdo) {
+        // utf8mb4_unicode_ci hace que email y nickname sean únicos sin
+        // distinguir mayúsculas, igual que el strcasecmp() anterior.
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS usuarios (
+                id         VARCHAR(64)  NOT NULL,
+                nombre     VARCHAR(150) NOT NULL,
+                nacimiento DATE         NOT NULL,
+                educacion  VARCHAR(50)  NOT NULL,
+                telefono   VARCHAR(30)  NOT NULL,
+                horas      VARCHAR(10)  NOT NULL,
+                email      VARCHAR(190) NOT NULL,
+                nickname   VARCHAR(80)  NOT NULL,
+                password   VARCHAR(255) NOT NULL,
+                createdAt  DATETIME     NOT NULL,
+                PRIMARY KEY (id),
+                UNIQUE KEY uq_usuarios_email (email),
+                UNIQUE KEY uq_usuarios_nickname (nickname)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+
+        // Las tarjetas tienen campos libres (name, bio, avatarUrl, color...).
+        // Se guardan como JSON para no perder ninguno y se indexan id,
+        // usuario_id y createdAt para poder consultarlas y ordenarlas.
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS tarjetas (
+                seq       BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                id        VARCHAR(64)     NOT NULL,
+                usuario_id VARCHAR(64)    NULL,
+                datos     JSON            NOT NULL,
+                createdAt DATETIME        NOT NULL,
+                PRIMARY KEY (seq),
+                UNIQUE KEY uq_tarjetas_id (id),
+                KEY idx_tarjetas_usuario (usuario_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+
+        migrarJsonSiHaceFalta($pdo);
+    }
+
+    function leerJson($ruta) {
+        if (!is_readable($ruta)) {
             return [];
         }
 
-        $contenido = file_get_contents(RUTA_DATOS);
+        $contenido = file_get_contents($ruta);
         if ($contenido === false || trim($contenido) === '') {
             return [];
         }
 
-        $tarjetas = json_decode($contenido, true);
-        // Si el JSON está corrupto se trata como lista vacía en lugar de
-        // romper toda la galería.
-        return is_array($tarjetas) ? $tarjetas : [];
+        $datos = json_decode($contenido, true);
+        return is_array($datos) ? $datos : [];
     }
-    function guardarTarjetas($tarjetas) {
-        $directorio = dirname(RUTA_DATOS);
-        if (!is_dir($directorio)) {
-            mkdir($directorio, 0755, true);
-        }
 
-        $json = json_encode(
-            $tarjetas,
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-        );
-        if ($json === false) {
-            return false;
-        }
+    function fechaValida($fecha) {
+        $fecha = (string) $fecha;
+        $objeto = DateTime::createFromFormat('Y-m-d', $fecha);
 
-        // LOCK_EX evita que dos escrituras simultáneas se pisen entre sí.
-        return file_put_contents(RUTA_DATOS, $json, LOCK_EX) !== false;
+        return ($objeto && $objeto->format('Y-m-d') === $fecha)
+            ? $fecha
+            : date('Y-m-d');
     }
-    /*--------------------------------------------------------------------------
-    * Usuarios: mismos helpers que las tarjetas, pero en api/data/usuarios.json.
-    * Las contraseñas NUNCA se guardan en texto plano.
-    *--------------------------------------------------------------------------*/
-    function leerUsuarios() {
-        if (!file_exists(RUTA_USUARIOS)) {
-            return [];
+
+    // Importa api/data/*.json una sola vez, cuando las tablas están vacías.
+    // Así las cuentas y tarjetas creadas antes de migrar a MySQL no se pierden.
+    function migrarJsonSiHaceFalta(PDO $pdo) {
+        $hayUsuarios = (int) $pdo->query('SELECT COUNT(*) FROM usuarios')->fetchColumn();
+
+        if ($hayUsuarios === 0) {
+            $usuarios = leerJson(RUTA_USUARIOS);
+            if ($usuarios) {
+                $stmt = $pdo->prepare(
+                    'INSERT IGNORE INTO usuarios
+                        (id, nombre, nacimiento, educacion, telefono, horas, email, nickname, password, createdAt)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                );
+
+                foreach ($usuarios as $usuario) {
+                    if (empty($usuario['id']) || empty($usuario['email']) || empty($usuario['password'])) {
+                        continue;
+                    }
+
+                    $stmt->execute([
+                        $usuario['id'],
+                        $usuario['nombre'] ?? '',
+                        fechaValida($usuario['nacimiento'] ?? ''),
+                        $usuario['educacion'] ?? '',
+                        $usuario['telefono'] ?? '',
+                        $usuario['horas'] ?? '',
+                        $usuario['email'],
+                        $usuario['nickname'] ?? '',
+                        $usuario['password'],
+                        $usuario['createdAt'] ?? date('Y-m-d H:i:s'),
+                    ]);
+                }
+            }
         }
 
-        $contenido = file_get_contents(RUTA_USUARIOS);
-        if ($contenido === false || trim($contenido) === '') {
-            return [];
-        }
+        $hayTarjetas = (int) $pdo->query('SELECT COUNT(*) FROM tarjetas')->fetchColumn();
 
-        $usuarios = json_decode($contenido, true);
-        return is_array($usuarios) ? $usuarios : [];
+        if ($hayTarjetas === 0) {
+            $tarjetas = leerJson(RUTA_DATOS);
+            if ($tarjetas) {
+                $stmt = $pdo->prepare(
+                    'INSERT IGNORE INTO tarjetas (id, usuario_id, datos, createdAt)
+                     VALUES (?, ?, ?, ?)'
+                );
+
+                foreach ($tarjetas as $tarjeta) {
+                    if (empty($tarjeta['id'])) {
+                        continue;
+                    }
+
+                    $datos = $tarjeta;
+                    unset($datos['id'], $datos['createdAt'], $datos['usuario_id']);
+
+                    $stmt->execute([
+                        $tarjeta['id'],
+                        $tarjeta['usuario_id'] ?? null,
+                        json_encode($datos, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                        $tarjeta['createdAt'] ?? date('Y-m-d H:i:s'),
+                    ]);
+                }
+            }
+        }
     }
-    function guardarUsuarios($usuarios) {
-        $directorio = dirname(RUTA_USUARIOS);
-        if (!is_dir($directorio)) {
-            mkdir($directorio, 0755, true);
-        }
 
-        $json = json_encode(
-            $usuarios,
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-        );
-        if ($json === false) {
-            return false;
-        }
-
-        return file_put_contents(RUTA_USUARIOS, $json, LOCK_EX) !== false;
-    }
     // Quita el hash de la contraseña antes de devolver un usuario al cliente.
     function usuarioPublico($usuario) {
         unset($usuario['password']);
         return $usuario;
     }
     $action = $_GET['action'] ?? $_POST['action'] ?? null;
-    switch($action){
-        case 'crear_tarjeta':
-            accionCrearTarjeta();
-            break;
-        case 'listar_tarjeta':
-        case 'listar_tarjetas':
-            accionListarTarjetas();
-            break;
-        case 'registrar_usuario':
-            accionRegistrarUsuario();
-            break;
-        case 'login':
-            accionLogin();
-            break;
-        case 'logout':
-            accionLogout();
-            break;
-        case 'check_session':
-            accionCheckSession();
-            break;
-        default:
-            responderError('Accion no reconocida o no especificada', 404);
+
+    try {
+        switch($action){
+            case 'crear_tarjeta':
+                accionCrearTarjeta();
+                break;
+            case 'listar_tarjeta':
+            case 'listar_tarjetas':
+                accionListarTarjetas();
+                break;
+            case 'registrar_usuario':
+                accionRegistrarUsuario();
+                break;
+            case 'login':
+                accionLogin();
+                break;
+            case 'logout':
+                accionLogout();
+                break;
+            case 'check_session':
+                accionCheckSession();
+                break;
+            default:
+                responderError('Accion no reconocida o no especificada', 404);
+        }
+    } catch (PDOException $e) {
+        responderError('Error al acceder a la base de datos.', 500);
     }
     /*--------------------------------------------------------------------------
     * Acciones
@@ -144,7 +255,7 @@
         $inputJSON = $_POST['datos_tarjeta'] ?? file_get_contents('php://input');
         $nuevaTarjeta = json_decode($inputJSON, true);
 
-        if (!$nuevaTarjeta || empty($nuevaTarjeta['name'])) {
+        if (!is_array($nuevaTarjeta) || trim((string) ($nuevaTarjeta['name'] ?? '')) === '') {
             responderError('Datos inválidos o incompletos.', 400);
         }
 
@@ -154,12 +265,25 @@
         // Si hay una sesión activa, la tarjeta queda ligada a ese usuario.
         $nuevaTarjeta['usuario_id'] = $_SESSION['usuario']['id'] ?? null;
 
-        $tarjetas = leerTarjetas();
-        $tarjetas[] = $nuevaTarjeta;
+        // id, usuario_id y createdAt tienen columnas propias; el resto de los
+        // campos libres de la tarjeta se conserva en la columna JSON `datos`.
+        $datos = $nuevaTarjeta;
+        unset($datos['id'], $datos['createdAt'], $datos['usuario_id']);
 
-        if (guardarTarjetas($tarjetas) === false) {
-            responderError('Error de permisos. El servidor no permite escribir en api/data/.', 500);
+        $json = json_encode($datos, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            responderError('No se pudo serializar la tarjeta.', 500);
         }
+
+        $stmt = conexion()->prepare(
+            'INSERT INTO tarjetas (id, usuario_id, datos, createdAt) VALUES (?, ?, ?, ?)'
+        );
+        $stmt->execute([
+            $nuevaTarjeta['id'],
+            $nuevaTarjeta['usuario_id'],
+            $json,
+            $nuevaTarjeta['createdAt'],
+        ]);
 
         responderExito('Tarjeta guardada correctamente en el servidor.', $nuevaTarjeta);
     }
@@ -168,7 +292,23 @@
             responderError('Método no permitido. Usa GET.', 405);
         }
 
-        $tarjetas = leerTarjetas();
+        $filas = conexion()
+            ->query('SELECT id, usuario_id, datos, createdAt FROM tarjetas ORDER BY seq ASC')
+            ->fetchAll();
+
+        $tarjetas = array_map(function ($fila) {
+            $tarjeta = json_decode($fila['datos'], true);
+            if (!is_array($tarjeta)) {
+                $tarjeta = [];
+            }
+
+            $tarjeta['id'] = $fila['id'];
+            $tarjeta['createdAt'] = $fila['createdAt'];
+            $tarjeta['usuario_id'] = $fila['usuario_id'];
+
+            return $tarjeta;
+        }, $filas);
+
         responderExito('Tarjetas obtenidas correctamente.', $tarjetas);
     }
     function accionRegistrarUsuario() {
@@ -192,39 +332,61 @@
             responderError('El correo electrónico no es válido.', 422);
         }
 
+        $nacimiento = trim($_POST['nacimiento']);
+        $fecha = DateTime::createFromFormat('Y-m-d', $nacimiento);
+        if (!$fecha || $fecha->format('Y-m-d') !== $nacimiento) {
+            responderError('La fecha de nacimiento no es válida.', 422);
+        }
+
         $password = (string) $_POST['password'];
         if (strlen($password) < 6) {
             responderError('La contraseña debe tener al menos 6 caracteres.', 422);
         }
 
-        $usuarios = leerUsuarios();
+        $nickname = trim($_POST['nickname']);
+        $pdo = conexion();
 
-        foreach ($usuarios as $usuarioExistente) {
-            if (isset($usuarioExistente['email']) && strcasecmp($usuarioExistente['email'], $email) === 0) {
+        // Comprobación para devolver un mensaje claro. Los índices UNIQUE de la
+        // tabla siguen protegiendo ante dos registros simultáneos.
+        $stmt = $pdo->prepare(
+            'SELECT id, email, nickname FROM usuarios WHERE email = ? OR nickname = ? LIMIT 1'
+        );
+        $stmt->execute([$email, $nickname]);
+        $usuarioExistente = $stmt->fetch();
+
+        if ($usuarioExistente) {
+            if (strcasecmp($usuarioExistente['email'], $email) === 0) {
                 responderError('Ya existe una cuenta registrada con ese correo.', 409);
             }
-            if (isset($usuarioExistente['nickname']) && strcasecmp($usuarioExistente['nickname'], trim($_POST['nickname'])) === 0) {
-                responderError('Ese nickname ya está en uso.', 409);
-            }
+            responderError('Ese nickname ya está en uso.', 409);
         }
 
         $usuario = [
             'id'         => uniqid('user_'),
             'nombre'     => trim($_POST['nombre']),
-            'nacimiento' => trim($_POST['nacimiento']),
+            'nacimiento' => $nacimiento,
             'educacion'  => trim($_POST['educacion']),
             'telefono'   => trim($_POST['telefono']),
             'horas'      => trim($_POST['horas']),
             'email'      => $email,
-            'nickname'   => trim($_POST['nickname']),
+            'nickname'   => $nickname,
             'password'   => password_hash($password, PASSWORD_DEFAULT),
             'createdAt'  => date('Y-m-d H:i:s'),
         ];
 
-        $usuarios[] = $usuario;
-
-        if (guardarUsuarios($usuarios) === false) {
-            responderError('Error de permisos. El servidor no permite escribir en api/data/.', 500);
+        try {
+            $stmt = $pdo->prepare(
+                'INSERT INTO usuarios
+                    (id, nombre, nacimiento, educacion, telefono, horas, email, nickname, password, createdAt)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->execute(array_values($usuario));
+        } catch (PDOException $e) {
+            // 23000 = violación de llave única (carrera entre dos registros).
+            if ($e->getCode() === '23000') {
+                responderError('El correo o el nickname ya están registrados.', 409);
+            }
+            throw $e;
         }
 
         responderExito('Registro exitoso. Ahora puedes iniciar sesión.', usuarioPublico($usuario));
@@ -241,18 +403,16 @@
             responderError('Correo y contraseña son obligatorios.', 422);
         }
 
-        $usuarioEncontrado = null;
-        foreach (leerUsuarios() as $usuario) {
-            if (isset($usuario['email']) && strcasecmp($usuario['email'], $email) === 0) {
-                $usuarioEncontrado = $usuario;
-                break;
-            }
-        }
+        // La colación utf8mb4_unicode_ci hace que la comparación no distinga
+        // mayúsculas de minúsculas, igual que antes con strcasecmp().
+        $stmt = conexion()->prepare('SELECT * FROM usuarios WHERE email = ? LIMIT 1');
+        $stmt->execute([$email]);
+        $usuarioEncontrado = $stmt->fetch();
 
         // Mismo mensaje para correo inexistente y contraseña incorrecta:
         // así no se filtra qué correos están registrados.
         if (
-            $usuarioEncontrado === null
+            !$usuarioEncontrado
             || !isset($usuarioEncontrado['password'])
             || !password_verify($password, $usuarioEncontrado['password'])
         ) {
@@ -261,9 +421,10 @@
 
         // Evita fijación de sesión al iniciar sesión.
         session_regenerate_id(true);
-        $_SESSION['usuario'] = usuarioPublico($usuarioEncontrado);
+        $usuario = usuarioPublico($usuarioEncontrado);
+        $_SESSION['usuario'] = $usuario;
 
-        responderExito('Bienvenido de nuevo.', usuarioPublico($usuarioEncontrado));
+        responderExito('Bienvenido de nuevo.', $usuario);
     }
     function accionLogout() {
         $_SESSION = [];
