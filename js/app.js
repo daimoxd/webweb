@@ -2,6 +2,8 @@
    * ESTADO GLOBAL
    */
   const state = {
+      isAuthenticated: false, // Bandera sesión (migrado SP2-2)
+      usuarioActual: null,
       cardData: {
           name: '',
           bio: '',
@@ -31,6 +33,16 @@
       navLinks: document.querySelectorAll('.nav-link'),
       galleryContainer: document.getElementById('gallery-container'),
       btnReloadGallery: document.getElementById('btn-reload-gallery'),
+      // Módulo Auth (migrado SP2-2)
+      viewAuth: document.getElementById('view-auth'),
+      tabLogin: document.getElementById('tab-login'),
+      tabRegister: document.getElementById('tab-register'),
+      formLogin: document.getElementById('form-login'),
+      formRegistro: document.getElementById('form-registro'),
+      navCrear: document.getElementById('nav-crear'),
+      navGaleria: document.getElementById('nav-galeria'),
+      navLogout: document.getElementById('nav-logout'),
+      navLogin: document.querySelector('a[href="#/login"]'),
   };
     /**
      * ENDPOINT ÚNICO
@@ -66,6 +78,7 @@
         'perro_xbox360.png',
         'WittyAlien.png'
     ];
+    const rutaAvatar = (archivo) => ASSETS_PATH + archivo;
 
     // Quitamos la extensión para usarla como texto alternativo legible.
     const nombreAvatar = (ruta) => ruta
@@ -80,7 +93,7 @@
    */
   const initAvatarSelector = () => {
       AVATARES.forEach((archivo) => {
-          const rutaImagen = ASSETS_PATH + archivo;
+          const rutaImagen = rutaAvatar(archivo);
           const img = document.createElement('img');
           img.src = rutaImagen;
           img.alt = nombreAvatar(rutaImagen);
@@ -126,6 +139,28 @@
   };
 
   /**
+   * LIMPIAR EL FORMULARIO Y LA TARJETA
+   * Restablece los valores a su estado por defecto
+   */
+  const resetCardState = () => {
+      // 1. Restablecemos el estado global
+      state.cardData = {
+          name: '',
+          bio: '',
+          avatarUrl: 'src/assets/HideoKojima.png', // mismo default que state inicial, existe en src/assets
+          color: '#3b82f6'
+      };
+
+      // 2. Limpiamos el campo de búsqueda de GitHub si se usó
+      dom.inputSearch.value = '';
+      dom.apiStatus.textContent = '';
+      dom.apiStatus.className = 'status-msg';
+
+      // 3. Forzamos el renderizado para que la vista previa y los inputs se limpien
+      renderCard();
+  };
+
+  /**
    * EVENTOS MANUALES
    */
   const setupManualEvents = () => {
@@ -149,7 +184,7 @@
           saveCardToServer();
       });
   };
-   
+
   /**
    * CONSUMO DE API Github
    */
@@ -286,10 +321,168 @@
   };
 
   /**
-   * ENRUTADOR BASADO EN HASH (El corazón de la SPA)
+   * ACTUALIZAR INTERFAZ DE AUTENTICACIÓN
+   * Oculta/muestra botones según si el usuario está logueado
+   */
+  const updateAuthUI = () => {
+      if (state.isAuthenticated) {
+          dom.navCrear.style.display = 'block';
+          dom.navGaleria.style.display = 'block';
+          dom.navLogout.style.display = 'block';
+          dom.navLogin.style.display = 'none'; // Ocultamos el botón "Iniciar Sesión"
+      } else {
+          dom.navCrear.style.display = 'none';
+          dom.navGaleria.style.display = 'none';
+          dom.navLogout.style.display = 'none';
+          dom.navLogin.style.display = 'block';
+      }
+  };
+
+  const showView = (viewToShow) => {
+      [dom.viewAuth, dom.viewCreate, dom.viewGallery].forEach(v => {
+          if (!v) return;
+          const active = v === viewToShow;
+          v.classList.toggle('active', active);
+          v.style.display = active ? 'block' : 'none';
+      });
+  };
+
+  /**
+   * EVENTOS DE AUTENTICACIÓN (Cambio de pestañas)
+   */
+  const setupAuthEvents = () => {
+      if (dom.tabLogin && dom.tabRegister) {
+          dom.tabLogin.addEventListener('click', () => {
+              dom.tabLogin.classList.add('active');
+              dom.tabRegister.classList.remove('active');
+              dom.formLogin.classList.add('active');
+              dom.formLogin.style.display = 'block';
+              dom.formRegistro.classList.remove('active');
+              dom.formRegistro.style.display = 'none';
+          });
+          dom.tabRegister.addEventListener('click', () => {
+              dom.tabRegister.classList.add('active');
+              dom.tabLogin.classList.remove('active');
+              dom.formRegistro.classList.add('active');
+              dom.formRegistro.style.display = 'block';
+              dom.formLogin.classList.remove('active');
+              dom.formLogin.style.display = 'none';
+          });
+      }
+
+      if (dom.formRegistro) {
+          dom.formRegistro.addEventListener('submit', async (e) => {
+              e.preventDefault(); // Evita la recarga de la página
+
+              const btnSubmit = dom.formRegistro.querySelector('button[type="submit"]');
+              const textoOriginal = btnSubmit.textContent;
+              btnSubmit.textContent = 'Registrando...';
+              btnSubmit.disabled = true;
+
+              try {
+                  // FormData captura automáticamente todos los campos con atributo 'name'
+                  const formData = new FormData(dom.formRegistro);
+
+                  const response = await fetch(`${API_ENDPOINT}?action=registrar_usuario`, {
+                      method: 'POST',
+                      body: formData
+                  });
+
+                  const result = await response.json();
+
+                  if (!response.ok) {
+                      throw new Error(result.error || 'Error al procesar el registro.');
+                  }
+
+                  alert(result.message || 'Registro exitoso. Ahora inicia sesión.');
+                  dom.formRegistro.reset();
+                  dom.tabLogin.click();
+              } catch (error) {
+                  alert('Error: ' + error.message);
+                  console.error('Error en registro:', error);
+              } finally {
+                  btnSubmit.textContent = textoOriginal;
+                  btnSubmit.disabled = false;
+              }
+          });
+      }
+
+      // PROCESO DE INICIO Y CIERRE DE SESIÓN
+      // Evento de Iniciar Sesión
+      if (dom.formLogin) {
+          dom.formLogin.addEventListener('submit', async (e) => {
+              e.preventDefault();
+
+              const btnSubmit = dom.formLogin.querySelector('button[type="submit"]');
+              const textoOriginal = btnSubmit.textContent;
+              btnSubmit.textContent = 'Verificando...';
+              btnSubmit.disabled = true;
+
+              try {
+                  const formData = new FormData(dom.formLogin);
+                  const response = await fetch(`${API_ENDPOINT}?action=login`, {
+                      method: 'POST',
+                      body: formData
+                  });
+
+                  const result = await response.json();
+
+                  if (!response.ok) throw new Error(result.error || 'Error de autenticación');
+
+                  // ¡Éxito! Actualizamos estado global
+                  state.isAuthenticated = true;
+                  state.usuarioActual = result.data;
+
+                  updateAuthUI();
+                  dom.formLogin.reset();
+
+                  // Redirigimos a la creación de perfil
+                  window.location.hash = '#/crear';
+              } catch (error) {
+                  alert('Error: ' + error.message);
+              } finally {
+                  btnSubmit.textContent = textoOriginal;
+                  btnSubmit.disabled = false;
+              }
+          });
+      }
+
+      // Evento de Cerrar Sesión
+      if (dom.navLogout) {
+          dom.navLogout.addEventListener('click', async (e) => {
+              e.preventDefault();
+              try {
+                  await fetch(`${API_ENDPOINT}?action=logout`);
+
+                  // Limpiamos estado
+                  state.isAuthenticated = false;
+                  state.usuarioActual = null;
+                  try { localStorage.removeItem('sesion'); } catch {}
+                  // 2 Limpiamos los datos de las tarjetas (Solución al problema)
+                  resetCardState();
+                  updateAuthUI();
+                  window.location.hash = '#/login'; // Expulsamos al login
+              } catch (error) {
+                  console.error('Error cerrando sesión:', error);
+              }
+          });
+      }
+
+      updateAuthUI();
+  };
+
+  /**
+   * ENRUTADOR BASADO EN HASH (El corazón de la SPA - Nueva versión)
    */
   const handleRouting = () => {
-    const currentHash = window.location.hash || '#/crear';
+    let currentHash = window.location.hash || '#/login';
+
+    // GUARDIÁN DE RUTAS (Route Guard)
+    // Si no está autenticado y trata de ir a crear o galería, lo regresamos al login
+    if (!state.isAuthenticated && currentHash !== '#/login') {
+      window.location.hash = '#/login';
+      return; // Detenemos la ejecución; el cambio de hash volverá a disparar la función
+    }
 
     dom.navLinks.forEach(link => {
       if (link.getAttribute('href') === currentHash) {
@@ -299,20 +492,43 @@
       }
     });
 
-    if (currentHash === '#/galeria') {
-      dom.viewCreate.classList.remove('active');
-      dom.viewCreate.style.display = 'none';
+    // Ocultar todas las vistas
+    dom.viewCreate.classList.remove('active');
+    dom.viewCreate.style.display = 'none';
+    dom.viewGallery.classList.remove('active');
+    dom.viewGallery.style.display = 'none';
+    dom.viewAuth.classList.remove('active');
+    dom.viewAuth.style.display = 'none';
 
+    // Mostrar la vista correspondiente
+    if (currentHash === '#/galeria') {
       dom.viewGallery.style.display = 'block';
       setTimeout(() => dom.viewGallery.classList.add('active'), 10);
-
       loadGalleryData();
-    } else {
-      dom.viewGallery.classList.remove('active');
-      dom.viewGallery.style.display = 'none';
-
+    } else if (currentHash === '#/crear') {
       dom.viewCreate.style.display = 'block';
       setTimeout(() => dom.viewCreate.classList.add('active'), 10);
+    } else {
+      dom.viewAuth.style.display = 'block';
+      setTimeout(() => dom.viewAuth.classList.add('active'), 10);
+    }
+  };
+
+  const checkActiveSession = async () => {
+    try {
+      const response = await fetch(`${API_ENDPOINT}?action=check_session`);
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        state.isAuthenticated = true;
+        state.usuarioActual = result.data;
+        updateAuthUI();
+      }
+    } catch (error) {
+      console.error("No hay sesión activa o hubo un error:", error);
+    } finally {
+      // Una vez comprobado, arrancamos el enrutador
+      handleRouting();
     }
   };
 
@@ -322,20 +538,24 @@
   document.addEventListener('DOMContentLoaded', () => {
       initAvatarSelector(); // Inicializamos la cuadrícula de imágenes
       setupManualEvents(); // Configurar eventos del formulario
-      dom.btnFetch.addEventListener('click', () => {
-      const username = dom.inputSearch.value.trim();
-      fetchGitHubData(username);
-    });
+      setupAuthEvents(); // Auth migrado SP2-2 (tabs + registro + login + logout)
 
-    dom.inputSearch.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        dom.btnFetch.click();
-      }
-    });
+      // Eliminamos la llamada directa a handleRouting() y ponemos:
+      checkActiveSession(); // Verifica si ya está logueado y luego enruta
+
+      dom.btnFetch.addEventListener('click', () => {
+        const username = dom.inputSearch.value.trim();
+        fetchGitHubData(username);
+      });
+
+      dom.inputSearch.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          dom.btnFetch.click();
+        }
+      });
       renderCard(); // Renderizar la tarjeta inicial
 
       window.addEventListener('hashchange', handleRouting);
       dom.btnReloadGallery.addEventListener('click', loadGalleryData);
-      handleRouting();
   });

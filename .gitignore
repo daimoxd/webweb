@@ -1,7 +1,8 @@
 # .gitignore
 
-# Datos generados en runtime: las tarjetas las crea la app, no el repo.
+# Datos generados en runtime: las tarjetas y usuarios los crea la app, no el repo.
 api/data/tarjetas.json
+api/data/usuarios.json
 
 # Entorno local de PHP
 vendor/
