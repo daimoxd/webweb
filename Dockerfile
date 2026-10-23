@@ -30,8 +30,8 @@ RUN mkdir -p /var/www/html/api/data \
     && chown -R www-data:www-data /var/www/html/api/data \
     && chmod 775 /var/www/html/api/data
 
-# Bloquea el acceso HTTP directo a api/data/ (por si queda el usuarios.json
-# antiguo con hashes de contrasenas). PHP puede seguir leyendo los archivos.
+# Bloquea el acceso HTTP directo a api/data/: ahi vive el tarjetas.json heredado
+# que solo PHP necesita leer para la importacion inicial. PHP no se ve afectado.
 RUN { \
       echo '<Directory /var/www/html/api/data>'; \
       echo '    Require all denied'; \
