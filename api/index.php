@@ -120,6 +120,16 @@
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
 
+        // Marca las importaciones ya ejecutadas. Sin esto, al borrar todos los
+        // usuarios la tabla quedaría vacía y el JSON se volvería a importar.
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS migraciones (
+                clave        VARCHAR(64) NOT NULL,
+                ejecutada_en DATETIME    NOT NULL,
+                PRIMARY KEY (clave)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+
         migrarJsonSiHaceFalta($pdo);
     }
 
@@ -149,6 +159,14 @@
     // Importa api/data/*.json una sola vez, cuando las tablas están vacías.
     // Así las cuentas y tarjetas creadas antes de migrar a MySQL no se pierden.
     function migrarJsonSiHaceFalta(PDO $pdo) {
+        $clave = 'json_inicial';
+
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM migraciones WHERE clave = ?');
+        $stmt->execute([$clave]);
+        if ((int) $stmt->fetchColumn() > 0) {
+            return;
+        }
+
         $hayUsuarios = (int) $pdo->query('SELECT COUNT(*) FROM usuarios')->fetchColumn();
 
         if ($hayUsuarios === 0) {
@@ -208,6 +226,12 @@
                 }
             }
         }
+
+        // Se marca aunque no hubiera JSON: la importación inicial ya se evaluó.
+        $stmt = $pdo->prepare(
+            'INSERT IGNORE INTO migraciones (clave, ejecutada_en) VALUES (?, ?)'
+        );
+        $stmt->execute([$clave, date('Y-m-d H:i:s')]);
     }
 
     // Quita el hash de la contraseña antes de devolver un usuario al cliente.
