@@ -1,8 +1,8 @@
 # .gitignore
 
-# Datos generados en runtime: las tarjetas y usuarios los crea la app, no el repo.
+# JSON heredado de la version anterior: solo las tarjetas. Se importa una vez
+# a MySQL y nunca se versiona (contiene datos locales).
 api/data/tarjetas.json
-api/data/usuarios.json
 
 # Entorno local de PHP
 vendor/

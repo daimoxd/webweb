@@ -20,10 +20,10 @@
     // contraseña vacía si alguien la define explícitamente así.
     define('DB_PASSWORD', getenv('DB_PASSWORD') !== false ? getenv('DB_PASSWORD') : 'sp123_pass');
 
-    // Los JSON de api/data/ ya no son la fuente de datos: solo se leen una vez
-    // para importar los registros existentes cuando la base está vacía.
-    define('RUTA_DATOS', __DIR__ . '/data/tarjetas.json');
-    define('RUTA_USUARIOS', __DIR__ . '/data/usuarios.json');
+    // api/data/tarjetas.json es el unico JSON que queda: se lee una sola vez
+    // para importar las tarjetas creadas antes de usar MySQL. Los usuarios
+    // viven unicamente en la base de datos.
+    define('RUTA_TARJETAS_JSON', __DIR__ . '/data/tarjetas.json');
     /**
     * --------------------------------------------------
     * Utilidades de respuesta
@@ -130,7 +130,7 @@
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
 
-        migrarJsonSiHaceFalta($pdo);
+        migrarTarjetasSiHaceFalta($pdo);
     }
 
     function leerJson($ruta) {
@@ -147,18 +147,11 @@
         return is_array($datos) ? $datos : [];
     }
 
-    function fechaValida($fecha) {
-        $fecha = (string) $fecha;
-        $objeto = DateTime::createFromFormat('Y-m-d', $fecha);
-
-        return ($objeto && $objeto->format('Y-m-d') === $fecha)
-            ? $fecha
-            : date('Y-m-d');
-    }
-
-    // Importa api/data/*.json una sola vez, cuando las tablas están vacías.
-    // Así las cuentas y tarjetas creadas antes de migrar a MySQL no se pierden.
-    function migrarJsonSiHaceFalta(PDO $pdo) {
+    // Importa api/data/tarjetas.json una sola vez, cuando la tabla está vacía.
+    // Así las tarjetas creadas antes de migrar a MySQL no se pierden.
+    function migrarTarjetasSiHaceFalta(PDO $pdo) {
+        // Se conserva la clave de la migración anterior para que, si ya corrió,
+        // no se vuelva a importar nada.
         $clave = 'json_inicial';
 
         $stmt = $pdo->prepare('SELECT COUNT(*) FROM migraciones WHERE clave = ?');
@@ -167,42 +160,10 @@
             return;
         }
 
-        $hayUsuarios = (int) $pdo->query('SELECT COUNT(*) FROM usuarios')->fetchColumn();
-
-        if ($hayUsuarios === 0) {
-            $usuarios = leerJson(RUTA_USUARIOS);
-            if ($usuarios) {
-                $stmt = $pdo->prepare(
-                    'INSERT IGNORE INTO usuarios
-                        (id, nombre, nacimiento, educacion, telefono, horas, email, nickname, password, createdAt)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-                );
-
-                foreach ($usuarios as $usuario) {
-                    if (empty($usuario['id']) || empty($usuario['email']) || empty($usuario['password'])) {
-                        continue;
-                    }
-
-                    $stmt->execute([
-                        $usuario['id'],
-                        $usuario['nombre'] ?? '',
-                        fechaValida($usuario['nacimiento'] ?? ''),
-                        $usuario['educacion'] ?? '',
-                        $usuario['telefono'] ?? '',
-                        $usuario['horas'] ?? '',
-                        $usuario['email'],
-                        $usuario['nickname'] ?? '',
-                        $usuario['password'],
-                        $usuario['createdAt'] ?? date('Y-m-d H:i:s'),
-                    ]);
-                }
-            }
-        }
-
         $hayTarjetas = (int) $pdo->query('SELECT COUNT(*) FROM tarjetas')->fetchColumn();
 
         if ($hayTarjetas === 0) {
-            $tarjetas = leerJson(RUTA_DATOS);
+            $tarjetas = leerJson(RUTA_TARJETAS_JSON);
             if ($tarjetas) {
                 $stmt = $pdo->prepare(
                     'INSERT IGNORE INTO tarjetas (id, usuario_id, datos, createdAt)
@@ -219,7 +180,9 @@
 
                     $stmt->execute([
                         $tarjeta['id'],
-                        $tarjeta['usuario_id'] ?? null,
+                        // Los usuarios ya no se migran desde JSON: las tarjetas
+                        // heredadas quedan sin dueño.
+                        null,
                         json_encode($datos, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                         $tarjeta['createdAt'] ?? date('Y-m-d H:i:s'),
                     ]);
