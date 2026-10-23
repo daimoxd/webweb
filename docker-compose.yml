@@ -9,14 +9,46 @@ services:
       # Codigo montado en caliente: editar un archivo en el host se refleja
       # al instante en el navegador, sin reconstruir la imagen.
       - .:/var/www/html
-      # Monta este volumen ENCIMA del bind mount para que el chmod del
-      # Dockerfile no se pierda: los permisos se aplican sobre la copia real.
-      - api_data:/var/www/html/api/data
     environment:
       # Apache registra en stdout/stderr para que `docker compose logs` muestre
       # los errores de PHP en lugar de esconderlos en archivos del contenedor.
       APACHE_DOCUMENT_ROOT: /var/www/html
+      # Conexion a MySQL. `db` es el nombre del servicio en esta misma red.
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${MYSQL_DATABASE:-sp123_web2}
+      DB_USER: ${MYSQL_USER:-sp123_user}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-sp123_pass}
+    depends_on:
+      # Espera a que MySQL acepte conexiones antes de levantar Apache/PHP.
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
+  db:
+    image: mysql:8.4
+    container_name: sp1-2-3web2-db
+    restart: unless-stopped
+    environment:
+      # Los valores se pueden sobreescribir con un archivo .env (ver .env.example).
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_pass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-sp123_web2}
+      MYSQL_USER: ${MYSQL_USER:-sp123_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-sp123_pass}
+    volumes:
+      # Datos persistentes: sobreviven a `docker compose down` y a rebuilds.
+      - db_data:/var/lib/mysql
+    # Si necesitas conectarte desde el host (DBeaver, Workbench, etc.):
+    # ports:
+    #   - "127.0.0.1:3306:3306"
+    healthcheck:
+      # -h 127.0.0.1 fuerza TCP: durante la inicializacion MySQL escucha solo
+      # por socket y aun no esta listo para la aplicacion.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
 volumes:
-  api_data:
+  db_data:
