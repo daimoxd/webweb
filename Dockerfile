@@ -1,5 +1,7 @@
-# Imagen base con Apache y PHP ya configurado.
-FROM php:8.3-apache
+# Imagen base con Apache y PHP 8.5 (ultima estable). Incluye el parche de
+# CVE-2026-109618 / CVE-2026-109619 desde 8.5.12. Reconstruye con
+# `docker compose build --pull` para recibir futuros parches de seguridad.
+FROM php:8.5-apache
 
 # No hay dependencias externas (sin Composer). Lo unico que hace falta es el
 # driver de MySQL para PDO, que es como la API habla con el servicio `db`.
